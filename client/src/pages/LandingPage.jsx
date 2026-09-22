@@ -125,12 +125,12 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="bg-dark py-12 text-center text-text-muted">
-        <div className="flex justify-center items-center gap-2 mb-6 opacity-50">
-          <div className="w-8 h-8 rounded-full bg-accent-gold flex items-center justify-center text-dark font-bold text-sm">أ</div>
-          <span className="text-xl font-bold text-white tracking-wider">أفق</span>
+      <footer className="bg-[#0D1F35] py-12 text-center border-t border-[#1E3A52]">
+        <div className="flex justify-center items-center gap-3 mb-4">
+          <div className="w-9 h-9 rounded-full bg-[#E8A94D] flex items-center justify-center text-[#0D1F35] font-bold text-base shadow-sm">أ</div>
+          <span className="text-2xl font-bold text-white tracking-wider">أفق</span>
         </div>
-        <p>© 2024 أفق — جميع الحقوق محفوظة</p>
+        <p className="text-gray-300 text-sm font-medium">© 2024 أفق للترجمة والتعريب — جميع الحقوق محفوظة</p>
       </footer>
     </div>
   );
