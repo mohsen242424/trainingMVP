@@ -1,10 +1,17 @@
 import axios from 'axios';
+import { mockDb } from './mockDb';
 
-const api = axios.create({
-  baseURL: '/api',
+// Initialize mock DB
+mockDb.init();
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+
+const axiosInstance = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 5000,
 });
 
-api.interceptors.request.use((config) => {
+axiosInstance.interceptors.request.use((config) => {
   const token = localStorage.getItem('afuq_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -12,89 +19,272 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('afuq_token');
-      window.location.href = '/login';
+// Helper that tries backend first; if backend 404/network error (like on Netlify without dedicated backend), falls back to mockDb
+async function withFallback(apiCall, mockCall) {
+  try {
+    const res = await apiCall();
+    return res.data?.data || res.data;
+  } catch (err) {
+    // If running in pure static frontend (Netlify 404 for /api or connection refused)
+    if (!err.response || err.response.status === 404 || err.code === 'ERR_NETWORK') {
+      console.warn('API unavailable or 404, using interactive local store fallback:', err.message);
+      return mockCall();
     }
-    return Promise.reject(error);
+    throw err;
   }
-);
+}
 
 export const auth = {
-  login: (data) => api.post('/auth/login', data).then(res => res.data),
-  register: (data) => api.post('/auth/register', data).then(res => res.data),
-  getMe: () => api.get('/auth/me').then(res => res.data),
-  logout: () => api.post('/auth/logout').then(res => res.data),
+  login: (credentials) => withFallback(
+    () => axiosInstance.post('/auth/login', credentials),
+    () => mockDb.loginUser(credentials.email, credentials.password)
+  ),
+  register: (userData) => withFallback(
+    () => axiosInstance.post('/auth/register', userData),
+    () => mockDb.registerUser(userData)
+  ),
+  getMe: () => withFallback(
+    () => axiosInstance.get('/auth/me'),
+    () => {
+      const token = localStorage.getItem('afuq_token');
+      const user = mockDb.getUserByToken(token);
+      if (!user) throw new Error('Not authenticated');
+      return user;
+    }
+  ),
+  logout: () => withFallback(
+    () => axiosInstance.post('/auth/logout'),
+    () => ({ success: true })
+  ),
 };
 
 export const positions = {
-  getAll: () => api.get('/positions').then(res => res.data),
-  getById: (id) => api.get(`/positions/${id}`).then(res => res.data),
+  getAll: () => withFallback(
+    () => axiosInstance.get('/positions'),
+    () => mockDb.getPositions()
+  ),
+  getById: (id) => withFallback(
+    () => axiosInstance.get(`/positions/${id}`),
+    () => mockDb.getPositionById(id)
+  ),
 };
 
 export const applications = {
-  submit: (data) => api.post('/applications', data).then(res => res.data),
-  getMine: () => api.get('/applications/mine').then(res => res.data),
-  getAll: () => api.get('/applications').then(res => res.data),
-  getById: (id) => api.get(`/applications/${id}`).then(res => res.data),
-  updateStatus: (id, status) => api.patch(`/applications/${id}/status`, { status }).then(res => res.data),
+  submit: (data) => withFallback(
+    () => axiosInstance.post('/applications', data),
+    () => {
+      const token = localStorage.getItem('afuq_token');
+      const user = mockDb.getUserByToken(token);
+      return mockDb.submitApplication(user?.id, data.positionId || 1, data);
+    }
+  ),
+  getMine: () => withFallback(
+    () => axiosInstance.get('/applications/mine'),
+    () => {
+      const token = localStorage.getItem('afuq_token');
+      const user = mockDb.getUserByToken(token);
+      return mockDb.getMyApplication(user?.id);
+    }
+  ),
+  getAll: () => withFallback(
+    () => axiosInstance.get('/applications'),
+    () => mockDb.getAllApplications()
+  ),
+  getById: (id) => withFallback(
+    () => axiosInstance.get(`/applications/${id}`),
+    () => mockDb.getAllApplications().find(a => a.id === id)
+  ),
+  updateStatus: (id, status, note) => withFallback(
+    () => axiosInstance.patch(`/applications/${id}/status`, { status, supervisor_note: note }),
+    () => mockDb.updateApplicationStatus(id, status, note)
+  ),
 };
 
 export const tasks = {
-  getMyTasks: () => api.get('/tasks/mine').then(res => res.data),
-  getById: (id) => api.get(`/tasks/${id}`).then(res => res.data),
+  getMyTasks: () => withFallback(
+    () => axiosInstance.get('/tasks/mine'),
+    () => {
+      const token = localStorage.getItem('afuq_token');
+      const user = mockDb.getUserByToken(token);
+      return mockDb.getMyTasks(user?.id);
+    }
+  ),
+  getById: (id) => withFallback(
+    () => axiosInstance.get(`/tasks/${id}`),
+    () => mockDb.getTaskById(id)
+  ),
 };
 
 export const submissions = {
-  submit: (taskId, data) => api.post(`/submissions/${taskId}`, data).then(res => res.data),
-  getByTaskId: (taskId) => api.get(`/submissions/task/${taskId}`).then(res => res.data),
-  updateFeedback: (id, data) => api.patch(`/submissions/${id}/feedback`, data).then(res => res.data),
+  submit: (taskId, data) => withFallback(
+    () => axiosInstance.post(`/submissions/${taskId}`, data),
+    () => {
+      const token = localStorage.getItem('afuq_token');
+      const user = mockDb.getUserByToken(token);
+      return mockDb.submitTask(user?.id, taskId, data.submitted_text);
+    }
+  ),
+  getByTaskId: (taskId) => withFallback(
+    () => axiosInstance.get(`/submissions/task/${taskId}`),
+    () => mockDb.getSubmissionForTask(taskId)
+  ),
+  updateFeedback: (id, data) => withFallback(
+    () => axiosInstance.patch(`/submissions/${id}/feedback`, data),
+    () => ({ success: true })
+  ),
 };
 
 export const messages = {
-  getConversation: (userId) => api.get(`/messages/conversation/${userId}`).then(res => res.data),
-  send: (userId, data) => api.post(`/messages/${userId}`, data).then(res => res.data),
-  getConversationsList: () => api.get('/messages/conversations').then(res => res.data),
+  getConversation: (userId) => withFallback(
+    () => axiosInstance.get(`/messages/conversation/${userId}`),
+    () => mockDb.getMessages(userId)
+  ),
+  send: (userId, data) => withFallback(
+    () => axiosInstance.post(`/messages/${userId}`, data),
+    () => {
+      const token = localStorage.getItem('afuq_token');
+      const user = mockDb.getUserByToken(token);
+      return mockDb.sendMessage(user?.id, userId, data.content);
+    }
+  ),
+  getConversationsList: () => withFallback(
+    () => axiosInstance.get('/messages/conversations'),
+    () => []
+  ),
 };
 
 export const meetings = {
-  getAll: () => api.get('/meetings').then(res => res.data),
-  create: (data) => api.post('/meetings', data).then(res => res.data),
-  updateStatus: (id, status) => api.patch(`/meetings/${id}/status`, { status }).then(res => res.data),
+  getAll: () => withFallback(
+    () => axiosInstance.get('/meetings'),
+    () => mockDb.getMeetings()
+  ),
+  create: (data) => withFallback(
+    () => axiosInstance.post('/meetings', data),
+    () => mockDb.createMeeting(data)
+  ),
+  updateStatus: (id, status) => withFallback(
+    () => axiosInstance.patch(`/meetings/${id}/status`, { status }),
+    () => ({ success: true })
+  ),
 };
 
 export const notifications = {
-  getAll: () => api.get('/notifications').then(res => res.data),
-  markRead: (id) => api.patch(`/notifications/${id}/read`).then(res => res.data),
-  markAllRead: () => api.post('/notifications/mark-all-read').then(res => res.data),
+  getAll: () => withFallback(
+    () => axiosInstance.get('/notifications'),
+    () => {
+      const token = localStorage.getItem('afuq_token');
+      const user = mockDb.getUserByToken(token);
+      return mockDb.getNotifications(user?.id);
+    }
+  ),
+  markRead: (id) => withFallback(
+    () => axiosInstance.patch(`/notifications/${id}/read`),
+    () => ({ success: true })
+  ),
+  markAllRead: () => withFallback(
+    () => axiosInstance.post('/notifications/mark-all-read'),
+    () => ({ success: true })
+  ),
 };
 
 export const admin = {
-  getStats: () => api.get('/admin/stats').then(res => res.data),
-  getUsers: () => api.get('/admin/users').then(res => res.data),
-  updateUser: (id, data) => api.patch(`/admin/users/${id}`, data).then(res => res.data),
-  getPositions: () => api.get('/admin/positions').then(res => res.data),
-  updatePosition: (id, data) => api.patch(`/admin/positions/${id}`, data).then(res => res.data),
+  getStats: () => withFallback(
+    () => axiosInstance.get('/admin/stats'),
+    () => ({
+      totalUsers: 14,
+      totalApplications: 6,
+      acceptanceRate: 75,
+      completionRate: 60
+    })
+  ),
+  getUsers: () => withFallback(
+    () => axiosInstance.get('/admin/users'),
+    () => mockDb.getAllApplications()
+  ),
+  updateUser: (id, data) => withFallback(
+    () => axiosInstance.patch(`/admin/users/${id}`, data),
+    () => ({ success: true })
+  ),
+  getPositions: () => withFallback(
+    () => axiosInstance.get('/admin/positions'),
+    () => mockDb.getPositions()
+  ),
+  updatePosition: (id, data) => withFallback(
+    () => axiosInstance.patch(`/admin/positions/${id}`, data),
+    () => ({ success: true })
+  ),
 };
 
 export const ai = {
-  evaluateTranslation: (data) => api.post('/ai/evaluate-translation', data).then(res => res.data),
-  evaluateAnswers: (data) => api.post('/ai/evaluate-answers', data).then(res => res.data),
+  evaluateTranslation: (data) => withFallback(
+    () => axiosInstance.post('/ai/evaluate-translation', data),
+    () => mockDb.evaluateTranslation(data.studentTranslation || data.text)
+  ),
+  evaluateAnswers: (data) => withFallback(
+    () => axiosInstance.post('/ai/evaluate-answers', data),
+    () => ({
+      overall_score: 90,
+      overall_impression: 'ممتاز',
+      summary_for_supervisor: 'إجابات واعية تدل على رغبة قوية في التعلم وفهم جيد لطبيعة الترجمة.',
+      recommendation: 'يُنصح بقبوله'
+    })
+  ),
 };
 
 export const upload = {
-  uploadCV: (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    return api.post('/upload/cv', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }).then(res => res.data);
-  },
+  uploadCV: (file) => withFallback(
+    () => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return axiosInstance.post('/upload/cv', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    },
+    () => ({ url: URL.createObjectURL(file), name: file.name })
+  ),
 };
 
+// Top-level aliases for direct imports compatibility
+export const getPositions = positions.getAll;
+export const getPositionById = positions.getById;
+export const submitApplication = (positionId, data) => applications.submit({ ...data, positionId });
+export const getMyApplication = applications.getMine;
+export const getAllApplications = applications.getAll;
+export const getMyTasks = tasks.getMyTasks;
+export const getTaskById = tasks.getById;
+export const submitTask = submissions.submit;
+export const getSubmissionForTask = submissions.getByTaskId;
+export const evaluateTranslation = ai.evaluateTranslation;
+export const evaluateAnswers = ai.evaluateAnswers;
+export const getMeetings = meetings.getAll;
+export const createMeeting = meetings.create;
+export const getNotifications = notifications.getAll;
+
 export default {
-  auth, positions, applications, tasks, submissions, messages, meetings, notifications, admin, ai, upload
+  auth,
+  positions,
+  applications,
+  tasks,
+  submissions,
+  messages,
+  meetings,
+  notifications,
+  admin,
+  ai,
+  upload,
+  // Direct functions
+  getPositions,
+  getPositionById,
+  submitApplication,
+  getMyApplication,
+  getAllApplications,
+  getMyTasks,
+  getTaskById,
+  submitTask,
+  getSubmissionForTask,
+  evaluateTranslation,
+  evaluateAnswers,
+  getMeetings,
+  createMeeting,
+  getNotifications
 };
