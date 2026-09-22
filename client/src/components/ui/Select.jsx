@@ -8,17 +8,29 @@ const Select = ({
   placeholder,
   error,
   className = '',
+  name,
+  id,
+  ...props
 }) => {
+  const handleChange = (e) => {
+    if (onChange) {
+      onChange(e);
+    }
+  };
+
   return (
     <div className={`flex flex-col w-full ${className}`}>
       {label && (
-        <label className="text-sm font-medium text-text-primary mb-1.5">
+        <label className="text-sm font-medium text-text-primary mb-1.5" htmlFor={id || name}>
           {label}
         </label>
       )}
       <select
+        id={id || name}
+        name={name}
         value={value}
-        onChange={onChange}
+        onChange={handleChange}
+        {...props}
         className={`
           w-full h-[44px] rounded-lg border px-3.5 text-sm transition-all duration-180
           bg-white text-text-primary

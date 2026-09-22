@@ -123,14 +123,14 @@ export default function RegisterPage() {
             label="السنة الدراسية"
             name="study_year"
             value={formData.study_year}
-            onChange={(val) => handleChange({ target: { name: 'study_year', value: val } })}
+            onChange={handleChange}
             options={yearOptions}
           />
           <Select
             label="اللغة الرئيسية"
             name="language"
             value={formData.language}
-            onChange={(val) => handleChange({ target: { name: 'language', value: val } })}
+            onChange={handleChange}
             options={languageOptions}
           />
           
