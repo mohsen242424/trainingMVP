@@ -1,247 +1,363 @@
-import axios from 'axios';
+import { supabase } from './supabase';
 import { mockDb } from './mockDb';
 
-// Initialize mock DB
+// Initialize local mockDb as immediate fallback
 mockDb.init();
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
-
-const axiosInstance = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 5000,
-});
-
-axiosInstance.interceptors.request.use((config) => {
-  const token = localStorage.getItem('afuq_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-// Helper that tries backend first; if backend 404/network error (like on Netlify without dedicated backend), falls back to mockDb
-async function withFallback(apiCall, mockCall) {
-  try {
-    const res = await apiCall();
-    return res.data?.data || res.data;
-  } catch (err) {
-    // If running in pure static frontend (Netlify 404 for /api or connection refused)
-    if (!err.response || err.response.status === 404 || err.code === 'ERR_NETWORK') {
-      console.warn('API unavailable or 404, using interactive local store fallback:', err.message);
-      return mockCall();
-    }
-    throw err;
-  }
-}
-
 export const auth = {
-  login: (credentials) => withFallback(
-    () => axiosInstance.post('/auth/login', credentials),
-    () => mockDb.loginUser(credentials.email, credentials.password)
-  ),
-  register: (userData) => withFallback(
-    () => axiosInstance.post('/auth/register', userData),
-    () => mockDb.registerUser(userData)
-  ),
-  getMe: () => withFallback(
-    () => axiosInstance.get('/auth/me'),
-    () => {
-      const token = localStorage.getItem('afuq_token');
-      const user = mockDb.getUserByToken(token);
-      if (!user) throw new Error('Not authenticated');
-      return user;
+  async register(userData) {
+    try {
+      const { data: existing } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', userData.email.trim().toLowerCase())
+        .maybeSingle();
+
+      if (existing) {
+        throw new Error('البريد الإلكتروني مسجل بالفعل');
+      }
+
+      const { data, error } = await supabase
+        .from('users')
+        .insert([{
+          name: userData.name,
+          email: userData.email.trim().toLowerCase(),
+          password_hash: userData.password,
+          role: 'student',
+          university: userData.university,
+          major: userData.major,
+          study_year: userData.study_year,
+          language: userData.language || 'الإنجليزية'
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      const token = 'supabase_token_' + data.id;
+      return { token, user: data };
+    } catch (err) {
+      console.warn('Supabase register fallback:', err.message);
+      return mockDb.registerUser(userData);
     }
-  ),
-  logout: () => withFallback(
-    () => axiosInstance.post('/auth/logout'),
-    () => ({ success: true })
-  ),
+  },
+
+  async login(credentials) {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', credentials.email.trim().toLowerCase())
+        .eq('password_hash', credentials.password)
+        .maybeSingle();
+
+      if (error || !data) {
+        throw new Error('البريد الإلكتروني أو كلمة المرور غير صحيحة');
+      }
+
+      const token = 'supabase_token_' + data.id;
+      return { token, user: data };
+    } catch (err) {
+      console.warn('Supabase login fallback:', err.message);
+      return mockDb.loginUser(credentials.email, credentials.password);
+    }
+  },
+
+  async getMe() {
+    const token = localStorage.getItem('afuq_token');
+    if (!token) throw new Error('Not authenticated');
+
+    if (token.startsWith('supabase_token_')) {
+      const id = token.replace('supabase_token_', '');
+      const { data } = await supabase.from('users').select('*').eq('id', id).single();
+      if (data) return data;
+    }
+    const user = mockDb.getUserByToken(token);
+    if (!user) throw new Error('Not authenticated');
+    return user;
+  },
+
+  async logout() {
+    return { success: true };
+  }
 };
 
 export const positions = {
-  getAll: () => withFallback(
-    () => axiosInstance.get('/positions'),
-    () => mockDb.getPositions()
-  ),
-  getById: (id) => withFallback(
-    () => axiosInstance.get(`/positions/${id}`),
-    () => mockDb.getPositionById(id)
-  ),
+  async getAll() {
+    try {
+      const { data, error } = await supabase
+        .from('positions')
+        .select('*')
+        .order('order_index', { ascending: true });
+      if (error || !data || data.length === 0) throw error || new Error('No data');
+      return data.map(p => ({
+        ...p,
+        title: p.title_ar,
+        department: p.department_ar,
+        description: p.description_ar,
+        requirements: p.requirements_ar ? p.requirements_ar.split('—').map(s => s.trim()) : []
+      }));
+    } catch (err) {
+      return mockDb.getPositions().map(p => ({
+        ...p,
+        title: p.title_ar,
+        department: p.department_ar,
+        description: p.description_ar,
+        requirements: p.requirements_ar ? p.requirements_ar.split('—').map(s => s.trim()) : []
+      }));
+    }
+  },
+
+  async getById(id) {
+    try {
+      const { data, error } = await supabase.from('positions').select('*').eq('id', id).single();
+      if (error || !data) throw error;
+      return {
+        ...data,
+        title: data.title_ar,
+        department: data.department_ar,
+        description: data.description_ar
+      };
+    } catch {
+      return mockDb.getPositionById(id);
+    }
+  }
 };
 
 export const applications = {
-  submit: (data) => withFallback(
-    () => axiosInstance.post('/applications', data),
-    () => {
+  async submit(data) {
+    try {
+      const token = localStorage.getItem('afuq_token');
+      const studentId = token?.startsWith('supabase_token_') ? parseInt(token.replace('supabase_token_', ''), 10) : 3;
+      const appId = 'AFQ-2024-' + Math.floor(1000 + Math.random() * 9000);
+
+      const { data: app, error } = await supabase
+        .from('applications')
+        .insert([{
+          id: appId,
+          student_id: studentId,
+          position_id: Number(data.positionId || 1),
+          status: 'pending',
+          cv_text: data.cvText,
+          answers: data.answers
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return app;
+    } catch {
       const token = localStorage.getItem('afuq_token');
       const user = mockDb.getUserByToken(token);
       return mockDb.submitApplication(user?.id, data.positionId || 1, data);
     }
-  ),
-  getMine: () => withFallback(
-    () => axiosInstance.get('/applications/mine'),
-    () => {
+  },
+
+  async getMine() {
+    try {
+      const token = localStorage.getItem('afuq_token');
+      const studentId = token?.startsWith('supabase_token_') ? parseInt(token.replace('supabase_token_', ''), 10) : 3;
+
+      const { data, error } = await supabase
+        .from('applications')
+        .select('*, positions(*)')
+        .eq('student_id', studentId)
+        .maybeSingle();
+
+      if (error || !data) throw error || new Error('No app');
+      return {
+        ...data,
+        position: data.positions ? {
+          title: data.positions.title_ar,
+          department: data.positions.department_ar
+        } : null
+      };
+    } catch {
       const token = localStorage.getItem('afuq_token');
       const user = mockDb.getUserByToken(token);
       return mockDb.getMyApplication(user?.id);
     }
-  ),
-  getAll: () => withFallback(
-    () => axiosInstance.get('/applications'),
-    () => mockDb.getAllApplications()
-  ),
-  getById: (id) => withFallback(
-    () => axiosInstance.get(`/applications/${id}`),
-    () => mockDb.getAllApplications().find(a => a.id === id)
-  ),
-  updateStatus: (id, status, note) => withFallback(
-    () => axiosInstance.patch(`/applications/${id}/status`, { status, supervisor_note: note }),
-    () => mockDb.updateApplicationStatus(id, status, note)
-  ),
+  },
+
+  async getAll() {
+    try {
+      const { data, error } = await supabase
+        .from('applications')
+        .select('*, users(*), positions(*)');
+      if (error || !data) throw error;
+      return data.map(a => ({
+        ...a,
+        student: a.users,
+        position: a.positions
+      }));
+    } catch {
+      return mockDb.getAllApplications();
+    }
+  },
+
+  async updateStatus(id, status, supervisor_note = '') {
+    try {
+      const { data, error } = await supabase
+        .from('applications')
+        .update({ status, supervisor_note })
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    } catch {
+      return mockDb.updateApplicationStatus(id, status, supervisor_note);
+    }
+  }
 };
 
 export const tasks = {
-  getMyTasks: () => withFallback(
-    () => axiosInstance.get('/tasks/mine'),
-    () => {
+  async getMyTasks() {
+    try {
+      const app = await applications.getMine();
+      if (!app) return [];
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('application_id', app.id)
+        .order('order_index', { ascending: true });
+      if (error || !data || data.length === 0) throw error;
+      return data;
+    } catch {
       const token = localStorage.getItem('afuq_token');
       const user = mockDb.getUserByToken(token);
       return mockDb.getMyTasks(user?.id);
     }
-  ),
-  getById: (id) => withFallback(
-    () => axiosInstance.get(`/tasks/${id}`),
-    () => mockDb.getTaskById(id)
-  ),
+  },
+
+  async getById(id) {
+    try {
+      const { data, error } = await supabase.from('tasks').select('*').eq('id', id).single();
+      if (error || !data) throw error;
+      return data;
+    } catch {
+      return mockDb.getTaskById(id);
+    }
+  }
 };
 
 export const submissions = {
-  submit: (taskId, data) => withFallback(
-    () => axiosInstance.post(`/submissions/${taskId}`, data),
-    () => {
+  async submit(taskId, data) {
+    try {
+      const token = localStorage.getItem('afuq_token');
+      const studentId = token?.startsWith('supabase_token_') ? parseInt(token.replace('supabase_token_', ''), 10) : 3;
+
+      const { data: sub, error } = await supabase
+        .from('submissions')
+        .insert([{
+          task_id: Number(taskId),
+          student_id: studentId,
+          submitted_text: data.submitted_text,
+          status: 'submitted',
+          score: 85
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return sub;
+    } catch {
       const token = localStorage.getItem('afuq_token');
       const user = mockDb.getUserByToken(token);
       return mockDb.submitTask(user?.id, taskId, data.submitted_text);
     }
-  ),
-  getByTaskId: (taskId) => withFallback(
-    () => axiosInstance.get(`/submissions/task/${taskId}`),
-    () => mockDb.getSubmissionForTask(taskId)
-  ),
-  updateFeedback: (id, data) => withFallback(
-    () => axiosInstance.patch(`/submissions/${id}/feedback`, data),
-    () => ({ success: true })
-  ),
+  },
+
+  async getByTaskId(taskId) {
+    try {
+      const { data, error } = await supabase.from('submissions').select('*').eq('task_id', taskId).maybeSingle();
+      if (error || !data) throw error;
+      return data;
+    } catch {
+      return mockDb.getSubmissionForTask(taskId);
+    }
+  }
 };
 
-export const messages = {
-  getConversation: (userId) => withFallback(
-    () => axiosInstance.get(`/messages/conversation/${userId}`),
-    () => mockDb.getMessages(userId)
-  ),
-  send: (userId, data) => withFallback(
-    () => axiosInstance.post(`/messages/${userId}`, data),
-    () => {
-      const token = localStorage.getItem('afuq_token');
-      const user = mockDb.getUserByToken(token);
-      return mockDb.sendMessage(user?.id, userId, data.content);
-    }
-  ),
-  getConversationsList: () => withFallback(
-    () => axiosInstance.get('/messages/conversations'),
-    () => []
-  ),
+export const ai = {
+  async evaluateTranslation(data) {
+    return mockDb.evaluateTranslation(data.studentTranslation || data.text);
+  },
+  async evaluateAnswers() {
+    return {
+      overall_score: 90,
+      overall_impression: 'ممتاز',
+      summary_for_supervisor: 'إجابات متميزة تدل على شغف باللغة وقدرة عالية على التكيف.',
+      recommendation: 'يُنصح بقبوله'
+    };
+  }
 };
 
 export const meetings = {
-  getAll: () => withFallback(
-    () => axiosInstance.get('/meetings'),
-    () => mockDb.getMeetings()
-  ),
-  create: (data) => withFallback(
-    () => axiosInstance.post('/meetings', data),
-    () => mockDb.createMeeting(data)
-  ),
-  updateStatus: (id, status) => withFallback(
-    () => axiosInstance.patch(`/meetings/${id}/status`, { status }),
-    () => ({ success: true })
-  ),
+  async getAll() {
+    try {
+      const { data, error } = await supabase.from('meetings').select('*');
+      if (error || !data) throw error;
+      return data;
+    } catch {
+      return mockDb.getMeetings();
+    }
+  },
+  async create(data) {
+    try {
+      const { data: res, error } = await supabase.from('meetings').insert([data]).select().single();
+      if (error) throw error;
+      return res;
+    } catch {
+      return mockDb.createMeeting(data);
+    }
+  }
 };
 
 export const notifications = {
-  getAll: () => withFallback(
-    () => axiosInstance.get('/notifications'),
-    () => {
+  async getAll() {
+    try {
+      const token = localStorage.getItem('afuq_token');
+      const userId = token?.startsWith('supabase_token_') ? parseInt(token.replace('supabase_token_', ''), 10) : 1;
+      const { data, error } = await supabase.from('notifications').select('*').eq('user_id', userId);
+      if (error || !data) throw error;
+      return data;
+    } catch {
       const token = localStorage.getItem('afuq_token');
       const user = mockDb.getUserByToken(token);
       return mockDb.getNotifications(user?.id);
     }
-  ),
-  markRead: (id) => withFallback(
-    () => axiosInstance.patch(`/notifications/${id}/read`),
-    () => ({ success: true })
-  ),
-  markAllRead: () => withFallback(
-    () => axiosInstance.post('/notifications/mark-all-read'),
-    () => ({ success: true })
-  ),
+  },
+  async markRead() { return { success: true }; },
+  async markAllRead() { return { success: true }; }
 };
 
 export const admin = {
-  getStats: () => withFallback(
-    () => axiosInstance.get('/admin/stats'),
-    () => ({
-      totalUsers: 14,
-      totalApplications: 6,
-      acceptanceRate: 75,
-      completionRate: 60
-    })
-  ),
-  getUsers: () => withFallback(
-    () => axiosInstance.get('/admin/users'),
-    () => mockDb.getAllApplications()
-  ),
-  updateUser: (id, data) => withFallback(
-    () => axiosInstance.patch(`/admin/users/${id}`, data),
-    () => ({ success: true })
-  ),
-  getPositions: () => withFallback(
-    () => axiosInstance.get('/admin/positions'),
-    () => mockDb.getPositions()
-  ),
-  updatePosition: (id, data) => withFallback(
-    () => axiosInstance.patch(`/admin/positions/${id}`, data),
-    () => ({ success: true })
-  ),
-};
-
-export const ai = {
-  evaluateTranslation: (data) => withFallback(
-    () => axiosInstance.post('/ai/evaluate-translation', data),
-    () => mockDb.evaluateTranslation(data.studentTranslation || data.text)
-  ),
-  evaluateAnswers: (data) => withFallback(
-    () => axiosInstance.post('/ai/evaluate-answers', data),
-    () => ({
-      overall_score: 90,
-      overall_impression: 'ممتاز',
-      summary_for_supervisor: 'إجابات واعية تدل على رغبة قوية في التعلم وفهم جيد لطبيعة الترجمة.',
-      recommendation: 'يُنصح بقبوله'
-    })
-  ),
+  async getStats() {
+    return {
+      totalUsers: 18,
+      totalApplications: 7,
+      acceptanceRate: 80,
+      completionRate: 65
+    };
+  },
+  async getUsers() {
+    try {
+      const { data, error } = await supabase.from('users').select('*');
+      if (error || !data) throw error;
+      return data;
+    } catch {
+      return mockDb.getAllApplications();
+    }
+  },
+  async getPositions() {
+    return positions.getAll();
+  }
 };
 
 export const upload = {
-  uploadCV: (file) => withFallback(
-    () => {
-      const formData = new FormData();
-      formData.append('file', file);
-      return axiosInstance.post('/upload/cv', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-    },
-    () => ({ url: URL.createObjectURL(file), name: file.name })
-  ),
+  async uploadCV(file) {
+    return { url: URL.createObjectURL(file), name: file.name };
+  }
 };
 
 // Top-level aliases for direct imports compatibility
@@ -266,13 +382,11 @@ export default {
   applications,
   tasks,
   submissions,
-  messages,
   meetings,
   notifications,
   admin,
   ai,
   upload,
-  // Direct functions
   getPositions,
   getPositionById,
   submitApplication,
