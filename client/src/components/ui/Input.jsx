@@ -12,6 +12,10 @@ const Input = ({
   required = false,
   className = '',
   dir = 'rtl',
+  name,
+  id,
+  disabled = false,
+  ...props
 }) => {
   const [showPassword, setShowPassword] = useState(false);
   const isPassword = type === 'password';
@@ -20,9 +24,9 @@ const Input = ({
   return (
     <div className={`flex flex-col w-full ${className}`}>
       {label && (
-        <label className="text-sm font-medium text-text-primary mb-1.5 flex items-center">
+        <label className="text-sm font-medium text-text-primary mb-1.5 flex items-center" htmlFor={id || name}>
           {label}
-          {required && <span className="text-error ml-1">*</span>}
+          {required && <span className="text-error mr-1">*</span>}
         </label>
       )}
       <div className="relative">
@@ -32,12 +36,16 @@ const Input = ({
           </div>
         )}
         <input
+          id={id || name}
+          name={name}
           type={inputType}
           placeholder={placeholder}
-          value={value}
+          value={value ?? ''}
           onChange={onChange}
           dir={dir}
           required={required}
+          disabled={disabled}
+          {...props}
           className={`
             w-full h-[44px] rounded-lg border px-3.5 text-sm transition-all duration-180
             bg-white text-text-primary placeholder:text-text-muted
@@ -45,6 +53,7 @@ const Input = ({
             ${Icon ? 'pr-10' : ''}
             ${isPassword ? 'pl-10' : ''}
             ${error ? 'border-error focus:border-error focus:ring-error/20' : 'border-border'}
+            ${disabled ? 'bg-gray-100 cursor-not-allowed opacity-75' : ''}
           `}
         />
         {isPassword && (

@@ -10,7 +10,7 @@ import api from '../lib/api';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
-  const { login } = useAuth(); // Assume register logs in automatically or use API
+  const { register } = useAuth();
   const { showToast } = useToast();
   
   const [formData, setFormData] = useState({
@@ -62,12 +62,11 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      const response = await api.register(formData);
-      // Assuming api.register handles context internally or returns user token
+      await register(formData);
       showToast('تم إنشاء الحساب بنجاح!', 'success');
       navigate('/explore');
     } catch (err) {
-      showToast(err.message || 'حدث خطأ أثناء التسجيل', 'error');
+      showToast(err.response?.data?.message || err.message || 'حدث خطأ أثناء التسجيل', 'error');
     } finally {
       setLoading(false);
     }

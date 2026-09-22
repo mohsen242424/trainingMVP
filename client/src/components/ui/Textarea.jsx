@@ -10,6 +10,9 @@ const Textarea = ({
   showCount = false,
   rows = 4,
   className = '',
+  name,
+  id,
+  ...props
 }) => {
   const currentLength = value?.length || 0;
   const isBelowMin = minLength && currentLength > 0 && currentLength < minLength;
@@ -18,15 +21,18 @@ const Textarea = ({
   return (
     <div className={`flex flex-col w-full ${className}`}>
       {label && (
-        <label className="text-sm font-medium text-text-primary mb-1.5 flex items-center">
+        <label className="text-sm font-medium text-text-primary mb-1.5 flex items-center" htmlFor={id || name}>
           {label}
         </label>
       )}
       <textarea
+        id={id || name}
+        name={name}
         rows={rows}
         placeholder={placeholder}
-        value={value}
+        value={value ?? ''}
         onChange={onChange}
+        {...props}
         className={`
           w-full rounded-lg border p-3.5 text-sm transition-all duration-180 resize-y
           bg-white text-text-primary placeholder:text-text-muted
