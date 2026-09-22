@@ -7,17 +7,21 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-primary font-arabic" dir="rtl">
       {/* Header */}
-      <header className="bg-dark text-white px-8 py-4 flex justify-between items-center">
+      <header className="bg-[#0D1F35] text-white px-8 py-5 flex justify-between items-center shadow-md">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-accent-gold flex items-center justify-center text-dark font-bold text-xl">أ</div>
-          <span className="text-2xl font-bold tracking-wider">أفق</span>
+          <div className="w-10 h-10 rounded-full bg-[#E8A94D] flex items-center justify-center text-[#0D1F35] font-bold text-xl shadow-md">أ</div>
+          <span className="text-2xl font-bold tracking-wider text-white">أفق</span>
         </div>
         <div className="flex items-center gap-4">
           <Link to="/login">
-            <Button variant="ghost" className="text-white hover:text-accent-gold hover:bg-dark-2">تسجيل الدخول</Button>
+            <button className="px-5 py-2.5 rounded-lg font-bold text-white hover:text-[#E8A94D] transition-colors">
+              تسجيل الدخول
+            </button>
           </Link>
           <Link to="/register">
-            <Button className="bg-accent-gold hover:bg-accent-gold/90 text-dark font-bold">ابدأ تجربتك</Button>
+            <button className="px-6 py-2.5 rounded-lg bg-[#E8A94D] hover:bg-[#d9983b] text-[#0D1F35] font-bold shadow-md transition-all">
+              ابدأ تجربتك
+            </button>
           </Link>
         </div>
       </header>

@@ -141,8 +141,56 @@ export default function ApplicationPage() {
               />
               
               <div className="mt-8">
-                <h3 className="text-lg font-bold text-dark mb-4">السيرة الذاتية</h3>
-                <Tabs tabs={cvTabsData} activeTab={cvTab} onChange={setCvTab} />
+                <h3 className="text-lg font-bold text-dark mb-3">السيرة الذاتية</h3>
+                
+                {/* CV Tab Toggle Buttons */}
+                <div className="flex bg-gray-100 p-1.5 rounded-xl mb-4 gap-2 border border-border">
+                  <button
+                    type="button"
+                    onClick={() => setCvTab(0)}
+                    className={`flex-1 py-2.5 px-4 rounded-lg font-bold text-sm transition-all duration-200 ${
+                      cvTab === 0 
+                        ? 'bg-white text-dark shadow-sm border border-border' 
+                        : 'text-text-secondary hover:text-dark'
+                    }`}
+                  >
+                    ✍️ أدخل سيرتك الذاتية نصياً
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCvTab(1)}
+                    className={`flex-1 py-2.5 px-4 rounded-lg font-bold text-sm transition-all duration-200 ${
+                      cvTab === 1 
+                        ? 'bg-white text-dark shadow-sm border border-border' 
+                        : 'text-text-secondary hover:text-dark'
+                    }`}
+                  >
+                    📁 رفع ملف PDF
+                  </button>
+                </div>
+
+                {/* CV Tab Contents */}
+                {cvTab === 0 ? (
+                  <div className="bg-gray-50/50 p-4 rounded-xl border border-border">
+                    <Textarea 
+                      label="محتوى السيرة الذاتية"
+                      value={formData.cvText}
+                      onChange={(e) => setFormData({...formData, cvText: e.target.value})}
+                      placeholder="انسخ والصق محتوى سيرتك الذاتية أو نبذة عن خبراتك ومهاراتك هنا..."
+                      rows={6}
+                    />
+                  </div>
+                ) : (
+                  <div className="bg-gray-50/50 p-4 rounded-xl border border-border">
+                    <FileUpload 
+                      accept=".pdf,.doc,.docx"
+                      maxSize={5}
+                      label="ملف السيرة الذاتية (PDF / Word)"
+                      currentFile={formData.cvFile}
+                      onFileSelect={handleFileSelect}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           )}
